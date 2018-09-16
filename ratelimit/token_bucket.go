@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/damnever/goctl/ring"
 )
 
 type tokenBucketRateLimiter struct {
@@ -55,19 +57,19 @@ func (l *tokenBucketRateLimiter) scheduling(limit int) {
 	} else if maxpending > 64 {
 		maxpending = 64
 	}
-	pending := newTokenReqRing()
+	pending := ring.New()
 	tryFeedPending := func() {
-		for pending.length() > 0 && bucket > 0 {
-			req := pending.fisrt()
+		for pending.Len() > 0 && bucket > 0 {
+			req := pending.Peek().(*tokenReq)
 			if req.iscanceled() {
-				pending.popfirst()
+				pending.Pop()
 				continue
 			}
 			if bucket < req.size {
 				break
 			}
 			bucket -= req.markdone()
-			pending.popfirst()
+			pending.Pop()
 		}
 	}
 	ticker := time.NewTicker(interval)
@@ -77,8 +79,8 @@ func (l *tokenBucketRateLimiter) scheduling(limit int) {
 	for {
 		select {
 		case <-l.stopc:
-			for pending.length() > 0 && bucket > 0 {
-				req := pending.popfirst()
+			for pending.Len() > 0 && bucket > 0 {
+				req := pending.Pop().(*tokenReq)
 				if !req.iscanceled() && bucket >= req.size {
 					bucket -= req.markdone()
 				}
@@ -91,7 +93,7 @@ func (l *tokenBucketRateLimiter) scheduling(limit int) {
 				bucket = limit
 			}
 			tryFeedPending()
-			if pending.length() >= maxpending {
+			if pending.Len() >= maxpending {
 				reqc = nil // Try the best? to reduce scheduling time.
 			} else {
 				reqc = l.reqc
@@ -100,13 +102,13 @@ func (l *tokenBucketRateLimiter) scheduling(limit int) {
 			// Since the reqc is unbuffered, we have no need to check if it's canceled.
 			// If there is pending requests and we let the newest pass, the largest
 			// requests may be starved.
-			if pending.length() == 0 && req.size <= bucket {
+			if pending.Len() == 0 && req.size <= bucket {
 				bucket -= req.markdone()
 			} else {
-				pending.add(req)
+				pending.Append(req)
 				tryFeedPending()
 			}
-			if pending.length() >= maxpending {
+			if pending.Len() >= maxpending {
 				reqc = nil
 			}
 		}
@@ -183,74 +185,4 @@ func (r *tokenReq) isdone() bool {
 		r.donec = nil
 		return false
 	}
-}
-
-type tokenReqRing struct {
-	reqs     []*tokenReq
-	start    int
-	end      int
-	size     int
-	cap      int
-	proposed int
-}
-
-func newTokenReqRing() *tokenReqRing {
-	return &tokenReqRing{
-		reqs:  make([]*tokenReq, 2, 2),
-		start: -1,
-		end:   -1,
-		size:  0,
-		cap:   2,
-	}
-}
-
-func (r *tokenReqRing) add(req *tokenReq) {
-	if r.size < r.cap {
-		r.end = (r.end + 1) % r.cap
-		if r.size == 0 {
-			r.start = 0
-			r.end = 0
-		}
-	} else {
-		old := r.reqs
-		next := r.cap
-		if cap := r.cap * 2; cap <= 128 {
-			r.cap = cap
-		} else {
-			r.cap += 32
-		}
-		r.reqs = make([]*tokenReq, r.cap, r.cap)
-		if r.end < r.start {
-			copy(r.reqs, old[r.start:])
-			copy(r.reqs[next-r.start:], old[:r.end+1])
-		} else {
-			copy(r.reqs, old[:])
-		}
-		r.end = next
-		r.start = 0
-	}
-	r.size++
-	r.reqs[r.end] = req
-}
-
-func (r *tokenReqRing) length() int {
-	return r.size
-}
-
-func (r *tokenReqRing) fisrt() *tokenReq {
-	return r.reqs[r.start]
-}
-
-func (r *tokenReqRing) popfirst() *tokenReq {
-	// XXX(damnever): free up memory?
-	r.size--
-	first := r.reqs[r.start]
-	r.reqs[r.start] = nil
-	if r.start != r.end {
-		r.start = (r.start + 1) % r.cap
-	} else {
-		r.start = -1
-		r.end = -1
-	}
-	return first
 }
