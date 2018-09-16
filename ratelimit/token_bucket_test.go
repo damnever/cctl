@@ -11,45 +11,6 @@ import (
 	"time"
 )
 
-func TestTokenReqRing(t *testing.T) {
-	r := newTokenReqRing()
-	r.add(&tokenReq{})
-	r.add(&tokenReq{})
-	assert(t, r.cap, 2)
-	assert(t, r.length(), 2)
-	assert(t, r.start, 0)
-	assert(t, r.end, 1)
-	r.add(&tokenReq{})
-	assert(t, r.cap, 4)
-	assert(t, r.length(), 3)
-	assert(t, r.start, 0)
-	assert(t, r.end, 2)
-	r.add(&tokenReq{})
-	r.popfirst()
-	assert(t, r.size, 3)
-	assert(t, r.start, 1)
-	r.popfirst()
-	r.popfirst()
-	r.popfirst()
-	assert(t, r.length(), 0)
-	assert(t, r.start, -1)
-	assert(t, r.start, -1)
-	r.reqs[0] = &tokenReq{size: 3}
-	r.reqs[1] = &tokenReq{size: 4}
-	r.reqs[2] = &tokenReq{size: 1}
-	r.reqs[3] = &tokenReq{size: 2}
-	r.end = 1
-	r.start = 2
-	r.size = 4
-	r.add(&tokenReq{size: 5})
-	assert(t, r.end, 4)
-	for i := 0; i < r.end; i++ {
-		assert(t, r.reqs[i].size, i+1)
-	}
-	r.popfirst()
-	assert(t, r.fisrt().size, 2)
-}
-
 func TestQPSLikeRateLimit(t *testing.T) {
 	l := NewTokenBucketRateLimiter(1000)
 	defer l.Close()
