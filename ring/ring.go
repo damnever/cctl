@@ -8,7 +8,7 @@ const (
 	lowWatermark = 64
 )
 
-// Ring is a circular slice which try the best to resue space.
+// Ring is a FIFO circular slice.
 type Ring struct {
 	items []interface{}
 	head  int
@@ -57,7 +57,7 @@ func (r *Ring) Pop() interface{} {
 		}
 
 		r.size--
-		if r.cap > lowWatermark && r.size <= r.cap/4 {
+		if r.cap > lowWatermark && r.size <= r.cap/2 {
 			r.cap = lowWatermark
 			r.resize()
 		}
